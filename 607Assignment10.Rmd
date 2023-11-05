@@ -1,0 +1,197 @@
+---
+title: "607Assignment10"
+author: "Lwin Shwe"
+date: "2023-11-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Introduction
+
+In Text Mining with R, Chapter 2 looks at Sentiment Analysis.  In this assignment, you should start by getting the primary example code from chapter 2 working in an R Markdown document.  You should provide a citation to this base code.  You’re then asked to extend the code in two ways:
+Work with a different corpus of your choosing, and
+Incorporate at least one additional sentiment lexicon (possibly from another R package that you’ve found through research).
+
+### Comparing Online Videos
+
+```{r load-news}
+set.seed(123)
+# Data manipulation
+library(data.table)
+library(dplyr)
+library(DT)
+# Time manipulation
+library(lubridate)
+# Visualization
+library(ggplot2)
+library(plotrix)
+library(corrplot)
+library(ggdendro)
+library(ggrepel)
+# Wordcloud
+library(wordcloud)
+# Text manipulation
+library(tidytext)
+library(stringr)
+library(tm)
+library(sentimentr)
+library(wordcloud)
+library(RSentiment)
+#Reading and Preparing Data
+gb <- tail(fread("~/GBvideos.csv",encoding = "UTF-8"),20000)
+gb[,"Location":="GB"]
+video <- as.data.table(gb)
+```
+
+### Correlation between parameters
+
+We can see that between views and likes we have a high correlation, I thought that we will have a similar correlation between views and dislikes, but is almost half of the like correlation.
+
+```{r plot}
+corrplot.mixed(corr = cor(video[,c("category_id","views","likes","dislikes","comment_total"),with=F]))
+```
+
+
+### Extract viewd videos
+
+```{r viewd-video}
+mvideo <- video[,.("Total_Views"=round(max(views,na.rm = T),digits = 2)),by=.(title,thumbnail_link)][order(-Total_Views)]
+mvideo %>% 
+mutate(image = paste0('<img width="80%" height="80%" src="', thumbnail_link , '"></img>')) %>% 
+arrange(-Total_Views) %>% 
+top_n(10,wt = Total_Views) %>% 
+select(image, title, Total_Views) %>% 
+datatable(class = "nowrap hover row-border", escape = FALSE, options = list(dom = 't',scrollX = TRUE, autoWidth = TRUE))
+```
+
+
+### Retrieve Liked Videos
+
+```{r liked}
+mvideo <- video[,.("Total_Likes"=round(max(likes,na.rm = T),digits = 2)),by=.(title,thumbnail_link)][order(-Total_Likes)]
+mvideo %>% 
+mutate(image = paste0('<img width="80%" height="80%" src="', thumbnail_link , '"></img>')) %>% 
+arrange(-Total_Likes) %>% 
+top_n(10,wt = Total_Likes) %>% 
+select(image, title, Total_Likes) %>% 
+datatable(class = "nowrap hover row-border", escape = FALSE, options = list(dom = 't',scrollX = TRUE, autoWidth = TRUE))
+```
+
+
+### Query Disliked Videos
+
+```{r disliked}
+mvideo <- video[,.("Total_Dislikes"=round(max(dislikes,na.rm = T),digits = 2)),by=.(title,thumbnail_link)][order(-Total_Dislikes)]
+mvideo %>% 
+mutate(image = paste0('<img width="80%" height="80%" src="', thumbnail_link , '"></img>')) %>% 
+arrange(-Total_Dislikes) %>% 
+top_n(10,wt = Total_Dislikes) %>% 
+select(image, title, Total_Dislikes) %>% 
+datatable(class = "nowrap hover row-border", escape = FALSE, options = list(dom = 't',scrollX = TRUE, autoWidth = TRUE))
+```
+
+
+### Plot Viewed Vs Liked Videos
+
+```{r tops}
+ggplot(video[,.("views"=max(views),"likes"=max(likes)),by=title],aes(views,likes,colour=likes,size=likes))+
+  geom_jitter()+
+  geom_smooth()+
+  guides(fill="none")+
+  labs(caption=NULL,title="Views Vs Likes",subtitle="In days")+
+  theme(legend.position ="none")+ geom_text_repel(data=subset(video[,.("views"=max(views),"likes"=max(likes)),by=title], views > 5e+07), aes(views,likes,label=title))
+```
+
+
+### Sentimentr Analysis
+
+```{r fields}
+sents_eap <- sentiment(video$title)
+sents_eap <- sents_eap[,.("word_count"=sum(word_count),"sentiment"=sum(sentiment)),by=element_id]
+ggplot(data=sents_eap)+
+geom_histogram(mapping = aes(x=sentiment),binwidth = .1)+
+theme_bw()+scale_fill_brewer(palette = "Set1")+
+geom_vline(xintercept = 0, color = "red", size = 1.5, alpha = 0.6, linetype = "longdash") +
+labs(title="Video Title Score",caption=NULL)+coord_cartesian(xlim = c(-4, 4))
+```
+
+
+### Top Videos Bigrams
+
+```{r sample}
+biga <- unnest_tokens(video,bigram, title, token = "ngrams", n = 2)
+biga <- as.data.table(biga)
+
+ggplot(biga[,.N,by=bigram][order(-N)][1:19],aes(reorder(bigram,-N),N,fill=bigram))+geom_bar(stat="identity")+geom_label(aes(label=N))+guides(fill="none")+theme(axis.text.x = element_text(angle = 45,hjust = 1))+  labs(caption=NULL,title="Top Video Title bigrams")+xlab(NULL)+ylab(NULL)
+```
+
+
+### Description of Sentiments
+
+SentimentScore == 0 refers to  "Neutral", SentimentScore > 0 means "Positive", and SentimentScore < 0 stands for  "Negative". 
+
+```{r sentiment}
+# Perform sentiment analysis (using SentimentIntensityAnalyzer from syuzhet package)
+library(syuzhet)
+sentiment_scores <- get_sentiment(video$title, method = "afinn")
+
+# Combine sentiment scores with the original data
+video$SentimentScore <- sentiment_scores
+
+# View summary statistics of sentiment variable
+summary(video$SentimentScore)
+
+# Create a bar plot of sentiment scores
+ggplot(video, aes(x = channel_title, y = sentiment_scores, fill = sentiment_scores)) +
+  geom_bar(stat = "identity") +
+
+  ggtitle("Description Sentiments")+xlab("Sentiment")+ylab("SentimentScore")+ 
+
+  theme(axis.text.x = element_text(angle = 45, size=8,hjust = 1))
+```
+
+
+### Visualize the Number of words in Video Title
+
+```{r word-length}
+video[,"Word_len":= str_length(title)]
+ggplot(video[,.N,keyby=Word_len],aes(Word_len,N,fill=N))+geom_bar(stat = "identity")+guides(fill="none")+labs(caption="Words Length",title="Word Length in Ttitle")+xlab(NULL)+ylab("Frequency of Words")
+```
+
+
+### Dispaly word cloud diagram
+
+```{r word-cloud}
+# Create a data frame for stop words (common words to exclude)
+stop_words <- data.frame(
+  word = c("a", "an", "the", "and", "is", "it", "this")
+)
+# Perform text preprocessing using tm package
+corpus <- Corpus(VectorSource(video$title))
+corpus <- tm_map(corpus, content_transformer(tolower))
+corpus <- tm_map(corpus, removePunctuation)
+corpus <- tm_map(corpus, removeNumbers)
+corpus <- tm_map(corpus, removeWords, stopwords("en"))
+corpus <- tm_map(corpus, stripWhitespace)
+
+# Create a document-term matrix
+dtm <- DocumentTermMatrix(corpus)
+
+# Convert the document-term matrix to a data frame
+wordcloud_data <- as.data.frame(as.matrix(dtm))
+
+# Calculate word frequencies
+word_frequencies <- colSums(wordcloud_data)
+
+# Generate a word cloud
+wordcloud(names(word_frequencies), word_frequencies, max.words = 100)
+```
+
+### Conclusions
+
+Sentiment analysis of comparing online videos is to find the viewed, liked, disliked, commented videos and emotions of users such as positive , negative and neutral depending on the sentiment_scores which they express on social media and other online resources. The revolution of social media sites has also attracted the users towards video sharing sites, such as YouTube. We can also see which words in videos' titles and viewers comments  led to higher numbers of word counts and favorites. Finally, All of these top 100 words are displayed in word cloud diagram.
+
+
